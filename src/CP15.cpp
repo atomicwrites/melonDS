@@ -32,12 +32,19 @@
 // this was measured to be close to hardware average
 // a value of 1 would represent a perfect cache, but that causes
 // games to run too fast, causing a number of issues
-const int kDataCacheTiming = 3;//2;
+const int kDataCacheTiming = 1;//2;
+const int kDataCacheTimingSlow = 17;
 const int kCodeCacheTiming = 3;//5;
 
+u64 sumDataCacheCycles = 0;
+u64 dataCacheInstrsCount = 0;
 
 void ARMv5::CP15Reset()
 {
+    printf("avg. %f\n", (float)sumDataCacheCycles/(float)dataCacheInstrsCount);
+    sumDataCacheCycles = 0;
+    dataCacheInstrsCount = 0;
+
     CP15Control = 0x2078; // dunno
 
     RNGSeed = 44203;
@@ -292,8 +299,8 @@ void ARMv5::UpdateRegionTimings(u32 addrstart, u32 addrend)
 
         if (pu & 0x10)
         {
-            MemTimings[i][1] = kDataCacheTiming;
-            MemTimings[i][2] = kDataCacheTiming;
+            MemTimings[i][1] = 0xFF;
+            MemTimings[i][2] = 0xFF;
             MemTimings[i][3] = 1;
         }
         else
@@ -305,6 +312,28 @@ void ARMv5::UpdateRegionTimings(u32 addrstart, u32 addrend)
     }
 }
 
+
+void ARMv5::CalcDCacheCycles(u32 addr)
+{
+    u64 prevAvg = DCacheHistorySum / 32;
+
+    DCacheHistorySum -= DCacheHistory[DCacheCurIndex];
+    DCacheHistory[DCacheCurIndex] = addr & ~0x1F;
+    DCacheHistorySum += DCacheHistory[DCacheCurIndex];
+
+    u64 curAvg = DCacheHistorySum / 32;
+
+    u64 diff = abs((s64)curAvg - (s64)prevAvg);
+    if (diff > 3)
+        DataCycles = kDataCacheTimingSlow;
+    else
+        DataCycles = kDataCacheTiming;
+    dataCacheInstrsCount++;
+    sumDataCacheCycles += DataCycles;
+
+    DCacheCurIndex++;
+    DCacheCurIndex &= 0x1F;
+}
 
 u32 ARMv5::RandomLineIndex()
 {
@@ -787,6 +816,11 @@ void ARMv5::DataRead8(u32 addr, u32* val)
 
     *val = BusRead8(addr);
     DataCycles = MemTimings[addr >> 12][1];
+
+    if (DataCycles == 0xFF)
+    {
+        CalcDCacheCycles(addr);
+    }
 }
 
 void ARMv5::DataRead16(u32 addr, u32* val)
@@ -810,6 +844,11 @@ void ARMv5::DataRead16(u32 addr, u32* val)
 
     *val = BusRead16(addr);
     DataCycles = MemTimings[addr >> 12][1];
+    
+    if (DataCycles == 0xFF)
+    {
+        CalcDCacheCycles(addr);
+    }
 }
 
 void ARMv5::DataRead32(u32 addr, u32* val)
@@ -833,6 +872,11 @@ void ARMv5::DataRead32(u32 addr, u32* val)
 
     *val = BusRead32(addr);
     DataCycles = MemTimings[addr >> 12][2];
+    
+    if (DataCycles == 0xFF)
+    {
+        CalcDCacheCycles(addr);
+    }
 }
 
 void ARMv5::DataRead32S(u32 addr, u32* val)
@@ -878,6 +922,11 @@ void ARMv5::DataWrite8(u32 addr, u8 val)
 
     BusWrite8(addr, val);
     DataCycles = MemTimings[addr >> 12][1];
+
+    if (DataCycles == 0xFF)
+    {
+        CalcDCacheCycles(addr);
+    }
 }
 
 void ARMv5::DataWrite16(u32 addr, u16 val)
@@ -904,6 +953,11 @@ void ARMv5::DataWrite16(u32 addr, u16 val)
 
     BusWrite16(addr, val);
     DataCycles = MemTimings[addr >> 12][1];
+
+    if (DataCycles == 0xFF)
+    {
+        CalcDCacheCycles(addr);
+    }
 }
 
 void ARMv5::DataWrite32(u32 addr, u32 val)
@@ -930,6 +984,11 @@ void ARMv5::DataWrite32(u32 addr, u32 val)
 
     BusWrite32(addr, val);
     DataCycles = MemTimings[addr >> 12][2];
+
+    if (DataCycles == 0xFF)
+    {
+        CalcDCacheCycles(addr);
+    }
 }
 
 void ARMv5::DataWrite32S(u32 addr, u32 val)
